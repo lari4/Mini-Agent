@@ -190,3 +190,162 @@ Guidelines:
 
 ---
 
+## Tool Description Prompts
+
+Tool description prompts are embedded in the tool class definitions and inform the AI about how to use each tool. These descriptions are automatically included in the system context when tools are registered.
+
+### 5. File Operations Tools
+
+**Location:** `mini_agent/tools/file_tools.py`
+
+#### ReadTool
+
+**Purpose:** Enables the agent to read file contents with support for line numbering and partial reading for large files.
+
+**Description:**
+```
+Read file contents from the filesystem. Output always includes line numbers
+in format 'LINE_NUMBER|LINE_CONTENT' (1-indexed). Supports reading partial content
+by specifying line offset and limit for large files.
+You can call this tool multiple times in parallel to read different files simultaneously.
+```
+
+**Parameters:**
+- `path`: Absolute or relative path to the file
+- `offset` (optional): Starting line number (1-indexed)
+- `limit` (optional): Number of lines to read
+
+**Features:**
+- Automatic token-based truncation (keeps head and tail)
+- Line number output format
+- Support for parallel file reading
+- Handles both absolute and workspace-relative paths
+
+#### WriteTool
+
+**Purpose:** Creates new files or overwrites existing files with content.
+
+**Description:**
+```
+Write content to a file. Creates new files or overwrites existing ones.
+Creates parent directories automatically if they don't exist.
+You can call this tool multiple times in parallel to write different files simultaneously.
+```
+
+**Parameters:**
+- `path`: File path (absolute or relative to workspace)
+- `content`: Content to write to the file
+
+#### EditTool
+
+**Purpose:** Makes precise in-place edits to existing files using old_string/new_string replacement.
+
+**Description:**
+```
+Edit a file by replacing specific content. Performs exact string matching and replacement.
+Requires both the exact original text and the replacement text.
+Useful for making precise changes without rewriting the entire file.
+```
+
+**Parameters:**
+- `path`: File path to edit
+- `old_string`: Exact text to find (must match exactly)
+- `new_string`: Replacement text
+
+---
+
+### 6. Bash Execution Tool
+
+**Location:** `mini_agent/tools/bash_tool.py`
+
+**Purpose:** Executes shell commands (bash on Unix/Linux/macOS, PowerShell on Windows) with support for background processes.
+
+**Description:**
+```
+Execute shell commands with support for background processes.
+On Unix/Linux/macOS uses bash, on Windows uses PowerShell.
+Returns stdout, stderr, exit code, and optionally a bash_id for background processes.
+Can timeout after specified duration (default 120 seconds).
+```
+
+**Parameters:**
+- `command`: Shell command to execute
+- `run_in_background` (optional): Whether to run in background (default: false)
+- `timeout` (optional): Command timeout in seconds (default: 120)
+
+**Features:**
+- Separate stdout/stderr capture
+- Background process management with bash_id
+- Process monitoring and output retrieval
+- Cross-platform support (bash/PowerShell)
+- Configurable timeouts
+
+**Associated Tools:**
+- `get_bash_output`: Retrieve output from background process
+- `kill_bash`: Terminate a background process
+
+---
+
+### 7. Skill Loading Tool
+
+**Location:** `mini_agent/tools/skill_tool.py`
+
+**Purpose:** Implements Progressive Disclosure Level 2 - loads full skill content on-demand when agent needs detailed guidance.
+
+**Description:**
+```
+Get complete content and guidance for a specified skill, used for executing specific types of tasks
+```
+
+**Parameters:**
+- `skill_name`: Name of the skill to retrieve (use list_skills to view available skills)
+
+**Usage Pattern:**
+1. Agent sees skill metadata in system prompt (Level 1)
+2. Agent calls `get_skill(skill_name)` to load full content (Level 2)
+3. Agent follows skill's procedural guidance
+4. Skill may reference additional resources (Level 3+)
+
+---
+
+### 8. Session Memory Tools
+
+**Location:** `mini_agent/tools/note_tool.py`
+
+**Purpose:** Allows agent to maintain persistent context across conversations and execution chains.
+
+#### SessionNoteTool (record_note)
+
+**Description:**
+```
+Record important information as session notes for future reference.
+Use this to record key facts, user preferences, decisions, or context
+that should be recalled later in the agent execution chain. Each note is timestamped.
+```
+
+**Parameters:**
+- `content`: The information to record as a note (be concise but specific)
+- `category` (optional): Category/tag for this note (e.g., 'user_preference', 'project_info', 'decision')
+
+**Storage:** Notes are stored in JSON format at `./workspace/.agent_memory.json`
+
+#### RecallNoteTool (recall_notes)
+
+**Description:**
+```
+Recall all previously recorded session notes.
+Use this to retrieve important information, context, or decisions
+from earlier in the session or previous agent execution chains.
+```
+
+**Parameters:**
+- `category` (optional): Filter notes by category
+
+**Features:**
+- Timestamped notes
+- Category-based organization
+- Persistent storage across sessions
+- Optional category filtering
+
+---
+
