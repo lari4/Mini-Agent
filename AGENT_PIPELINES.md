@@ -1115,3 +1115,238 @@ messages = [
 
 ---
 
+## Pipeline Integration & Summary
+
+### How Pipelines Interact
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    COMPLETE AGENT LIFECYCLE                      │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────┐    │
+│  │ 1. INITIALIZATION PIPELINE                             │    │
+│  │    Load config → Init LLM → Create tools → Load       │    │
+│  │    system prompt → Inject skills metadata (Lvl 1) →   │    │
+│  │    Create agent → Add user message                    │    │
+│  └─────────────────────┬──────────────────────────────────┘    │
+│                        ↓                                        │
+│  ┌────────────────────────────────────────────────────────┐    │
+│  │ 2. EXECUTION LOOP (MAIN PIPELINE)                      │    │
+│  │                                                        │    │
+│  │  ┌──────────────────────────────────────────┐        │    │
+│  │  │ Check Tokens → Summarize if needed       │←───────┼────┼─── MESSAGE SUMMARIZATION
+│  │  └──────────────────┬───────────────────────┘        │    │     PIPELINE (when > limit)
+│  │                     ↓                                 │    │
+│  │  ┌──────────────────────────────────────────┐        │    │
+│  │  │ Call LLM (with messages + tools)         │        │    │
+│  │  └──────────────────┬───────────────────────┘        │    │
+│  │                     ↓                                 │    │
+│  │  ┌──────────────────────────────────────────┐        │    │
+│  │  │ Process Response:                        │        │    │
+│  │  │ - Add assistant message                  │        │    │
+│  │  │ - Check for tool calls                   │        │    │
+│  │  └──────────────────┬───────────────────────┘        │    │
+│  │                     ↓                                 │    │
+│  │            ┌────────────────┐                        │    │
+│  │            │ Tool calls?    │                        │    │
+│  │            └───┬────────┬───┘                        │    │
+│  │                NO       YES                          │    │
+│  │                ↓        ↓                            │    │
+│  │         ┌──────────┐  ┌─────────────────────┐       │    │
+│  │         │ COMPLETE │  │ Execute Tools       │←──────┼────┼─── TOOL EXECUTION
+│  │         └──────────┘  │ (each tool_call)    │       │    │     PIPELINE
+│  │                       └──────────┬──────────┘       │    │
+│  │                                  │                  │    │
+│  │         ┌────────────────────────┘                  │    │
+│  │         │  Specific Tool Pipelines:                │    │
+│  │         │                                           │    │
+│  │         ├→ get_skill() ─────────────────────────┐  │    │
+│  │         │  (Load skill content - Level 2)       │  │    │
+│  │         │                                        ↓  │    │
+│  │         │  ┌─────────────────────────────────────────┼──┼─── SKILL LOADING PIPELINE
+│  │         │  │ SkillLoader → Skill.to_prompt()   │  │    │     (Progressive Disclosure)
+│  │         │  └────────────────────────────────────┘  │    │
+│  │         │                                           │    │
+│  │         ├→ record_note() / recall_notes() ────┐   │    │
+│  │         │                                       ↓   │    │
+│  │         │  ┌─────────────────────────────────────────┼──┼─── SESSION MEMORY PIPELINE
+│  │         │  │ Save/Load .agent_memory.json      │   │    │
+│  │         │  └────────────────────────────────────┘   │    │
+│  │         │                                            │    │
+│  │         ├→ read_file() / write_file() / edit_file() │    │
+│  │         │                                            │    │
+│  │         ├→ bash() / get_bash_output() / kill_bash() │    │
+│  │         │                                            │    │
+│  │         └→ [MCP Tools...]                           │    │
+│  │                                                      │    │
+│  │         All tool results → Add to messages →       │    │
+│  │         LOOP back to top                            │    │
+│  │                                                      │    │
+│  └──────────────────────────────────────────────────────┘    │
+│                                                               │
+└───────────────────────────────────────────────────────────────┘
+```
+
+### Pipeline Summary Table
+
+| Pipeline | Trigger | Frequency | Purpose | Key Data Flow |
+|----------|---------|-----------|---------|---------------|
+| **Initialization** | CLI start | Once per session | Setup agent environment | config.yaml → system_prompt + skills metadata → Agent instance |
+| **Execution Loop** | agent.run() | Once per task | Main agent logic | messages → LLM → tool_calls → tool_results → messages → loop |
+| **Summarization** | Tokens > limit | As needed | Prevent context overflow | full messages → LLM summary → condensed messages |
+| **Skill Loading** | get_skill() call | Per skill needed | Load specialized knowledge | skill name → SkillLoader → full SKILL.md content |
+| **Session Memory** | record/recall calls | User-driven | Maintain persistent context | notes ↔ .agent_memory.json |
+| **Tool Execution** | Each tool call | Multiple per step | Execute actions | tool_call → tool.execute() → ToolResult → message |
+
+### Prompt Flow Through Pipelines
+
+```
+PROMPTS AT DIFFERENT STAGES:
+
+Initialization:
+  └→ system_prompt.md (enhanced with skills metadata)
+
+Execution Loop:
+  ├→ System prompt (every LLM call)
+  ├→ User messages (task requests)
+  ├→ Assistant messages (agent reasoning)
+  ├→ Tool result messages (execution outputs)
+  └→ [Summarization prompt - if triggered]
+      └→ "You are assistant skilled at summarizing..."
+          + "Please provide concise summary..."
+
+Skill Loading:
+  └→ get_skill(name) → Full SKILL.md content
+      ├→ YAML frontmatter
+      ├→ Procedural instructions
+      └→ Resource references
+
+Session Memory:
+  └→ [Optional] Session memory instructions in task prompt
+      └→ "IMPORTANT - Session Memory: You have record_note..."
+
+Tool Results:
+  └→ Structured data from tool execution
+      ├→ File contents (read_file)
+      ├→ Command output (bash)
+      ├→ Skill content (get_skill)
+      └→ Saved notes (recall_notes)
+```
+
+### Key Design Patterns
+
+**1. Progressive Disclosure**
+- Skills: 3-level loading (metadata → full content → resources)
+- Tokens: Only load what's needed when needed
+- Benefits: Scales to many skills without context bloat
+
+**2. Message History Management**
+- Automatic summarization when tokens exceed limit
+- Preserves user intent, summarizes agent execution
+- Enables long-running conversations
+
+**3. Tool-Based Architecture**
+- All actions through uniform tool interface
+- Consistent error handling and logging
+- Easy to add new capabilities
+
+**4. Persistent Context**
+- Session memory survives restarts
+- Category-based organization
+- Lazy file creation
+
+**5. Error Resilience**
+- Tool failures don't stop execution
+- Errors converted to ToolResults
+- Agent can retry or adjust approach
+
+### Configuration Points
+
+Users can customize pipelines through:
+
+**config.yaml:**
+```yaml
+agent:
+  max_steps: 50              # Execution loop iterations
+  token_limit: 80000         # Summarization trigger
+  system_prompt_path: "system_prompt.md"
+  skills_dir: "skills/"      # Skill discovery location
+
+llm:
+  provider: "anthropic"      # or "openai"
+  model: "claude-sonnet-4.5"
+  api_key: "${ANTHROPIC_API_KEY}"
+```
+
+**Environment Variables:**
+- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
+- Custom paths via CLI flags
+
+**Skill Configuration:**
+- Add new skills by creating `skills/<name>/SKILL.md`
+- Skills automatically discovered at initialization
+
+**MCP Configuration:**
+- Enable/disable via `mcp_config_path` in config.yaml
+- Configure servers in separate MCP config file
+
+### Performance Characteristics
+
+| Pipeline | Latency | Token Cost | Frequency |
+|----------|---------|------------|-----------|
+| Initialization | ~100ms | 0 | Once |
+| Execution Loop Step | ~2-5s | 1K-10K | Per step |
+| Summarization | ~3-8s | 2K-5K | Rare |
+| Skill Loading | <100ms | 0 | Per skill |
+| Session Memory | <10ms | 0 | Variable |
+| Tool Execution | Variable | 0 | Per tool call |
+
+**Token Efficiency:**
+- Skills metadata (Level 1): ~50-200 tokens total
+- Full skill content (Level 2): ~1K-5K tokens per skill
+- Summarized execution: ~50-70% reduction from original
+
+### Extension Points
+
+To add new capabilities:
+
+**1. New Tool:**
+```python
+# Create tool class
+class MyTool(Tool):
+    @property
+    def name(self) -> str:
+        return "my_tool"
+    
+    @property
+    def description(self) -> str:
+        return "What this tool does..."
+    
+    async def execute(self, **kwargs) -> ToolResult:
+        # Implementation
+        pass
+
+# Register in tools list
+tools.append(MyTool())
+```
+
+**2. New Skill:**
+```
+skills/my-skill/
+├── SKILL.md           # Required: YAML + instructions
+├── scripts/           # Optional: Executable code
+├── references/        # Optional: Documentation
+└── assets/            # Optional: Templates
+```
+
+**3. Custom Pipeline:**
+- Add method to `Agent` class
+- Call from `run()` loop or tool execution
+- Follow existing patterns for consistency
+
+---
+
+**Document Version:** 1.0  
+**Last Updated:** 2025-11-14  
+**Total Pipelines Documented:** 6
+
