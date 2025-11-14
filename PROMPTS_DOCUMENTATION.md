@@ -349,3 +349,195 @@ from earlier in the session or previous agent execution chains.
 
 ---
 
+## Skill-Based Prompts
+
+Skills are modular, self-contained packages that extend the agent's capabilities with specialized knowledge, workflows, and tools. Each skill consists of a SKILL.md file containing instructions and optional bundled resources (scripts, references, assets).
+
+**Location:** `mini_agent/skills/*/SKILL.md`
+
+**Progressive Disclosure Pattern:**
+- **Level 1:** Agent sees skill name + description in system prompt
+- **Level 2:** Agent calls `get_skill(skill_name)` to load full instructions
+- **Level 3+:** Agent accesses bundled resources as needed
+
+### Skill Structure
+
+Each SKILL.md file contains:
+1. **YAML Frontmatter:** `name`, `description`, `license`
+2. **Markdown Instructions:** Step-by-step procedural guidance
+3. **Tool Integration:** How to use bash, file operations, and other tools
+4. **Resource References:** Links to scripts/, references/, assets/ directories
+
+---
+
+### 9. Skill Creator
+
+**Location:** `mini_agent/skills/skill-creator/SKILL.md`
+
+**Purpose:** Meta-skill that provides guidance for creating new skills. Teaches skill design patterns, progressive disclosure principles, and best practices.
+
+**When Used:** When users want to create or update skills that extend agent capabilities.
+
+**Key Concepts Covered:**
+- Skill anatomy (SKILL.md structure, bundled resources)
+- Progressive disclosure design principle
+- When to use scripts vs. references vs. assets
+- Metadata quality (name and description)
+- Context management strategies
+
+**Prompt Structure:**
+```markdown
+---
+name: skill-creator
+description: Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Claude's capabilities with specialized knowledge, workflows, or tool integrations.
+---
+
+# Skill Creator
+
+[Instructions on skill design patterns]
+
+## About Skills
+[Explanation of what skills provide and how they work]
+
+### Anatomy of a Skill
+[Detailed breakdown of skill components]
+
+### Progressive Disclosure Design Principle
+[Three-level loading system explanation]
+```
+
+---
+
+### 10. Artifacts Builder
+
+**Location:** `mini_agent/skills/artifacts-builder/SKILL.md`
+
+**Purpose:** Comprehensive guide for creating complex, multi-component HTML artifacts for claude.ai using React, TypeScript, Vite, Tailwind CSS, and shadcn/ui components.
+
+**When Used:** For building elaborate frontend artifacts requiring state management, routing, or shadcn/ui components (not simple single-file HTML).
+
+**Stack:** React 18 + TypeScript + Vite + Parcel (bundling) + Tailwind CSS + shadcn/ui
+
+**Workflow Steps:**
+1. Initialize frontend repo using `scripts/init-artifact.sh`
+2. Develop artifact by editing generated code
+3. Bundle all code into single HTML file using `scripts/bundle-artifact.sh`
+4. Display artifact to user
+5. (Optional) Test the artifact
+
+**Bundled Resources:**
+- `scripts/init-artifact.sh` - Project initialization script
+- `scripts/bundle-artifact.sh` - Bundling script to create single HTML file
+
+**Design Guidelines:**
+```
+VERY IMPORTANT: To avoid what is often referred to as "AI slop", avoid using excessive
+centered layouts, purple gradients, uniform rounded corners, and Inter font.
+```
+
+**Prompt Structure:**
+```markdown
+---
+name: artifacts-builder
+description: Suite of tools for creating elaborate, multi-component claude.ai HTML artifacts using modern frontend web technologies (React, Tailwind CSS, shadcn/ui). Use for complex artifacts requiring state management, routing, or shadcn/ui components - not for simple single-file HTML/JSX artifacts.
+---
+
+# Artifacts Builder
+
+[Step-by-step workflow instructions]
+
+## Design & Style Guidelines
+[Anti-AI-slop guidance]
+
+## Quick Start
+[Initialization, development, bundling steps]
+
+## Common Development Tasks
+[Specific implementation guidance]
+```
+
+---
+
+### 11. MCP Builder
+
+**Location:** `mini_agent/skills/mcp-builder/SKILL.md`
+
+**Purpose:** Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools.
+
+**When Used:** When building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK).
+
+**Key Design Principles:**
+- Build for workflows, not just API endpoints
+- Optimize for limited context (return high-signal information)
+- Design actionable error messages that guide agents
+- Follow natural task subdivisions
+- Use evaluation-driven development
+
+**Process Phases:**
+1. **Phase 1:** Deep research and planning
+2. **Phase 2:** Implementation
+3. **Phase 3:** Testing and evaluation
+4. **Phase 4:** Documentation and deployment
+
+**Agent-Centric Design Principles:**
+```markdown
+**Build for Workflows, Not Just API Endpoints:**
+- Don't simply wrap existing API endpoints - build thoughtful, high-impact workflow tools
+- Consolidate related operations
+- Focus on tools that enable complete tasks
+
+**Optimize for Limited Context:**
+- Make every token count
+- Provide "concise" vs "detailed" response format options
+- Default to human-readable identifiers over technical codes
+
+**Design Actionable Error Messages:**
+- Guide agents toward correct usage patterns
+- Suggest specific next steps
+- Make errors educational
+```
+
+**Prompt Structure:**
+```markdown
+---
+name: mcp-builder
+description: Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK).
+---
+
+# MCP Server Development Guide
+
+## Overview
+[Introduction to MCP server quality principles]
+
+# Process
+
+## 🚀 High-Level Workflow
+[Four-phase development process]
+
+### Phase 1: Deep Research and Planning
+[Agent-centric design principles, documentation study]
+
+[Additional phases with detailed instructions]
+```
+
+---
+
+### 12. Other Available Skills
+
+The following skills are also available in the system:
+
+| Skill Name | Description | Primary Use Case |
+|------------|-------------|------------------|
+| **algorithmic-art** | Generative art and algorithmic creation | Creating computational art pieces |
+| **brand-guidelines** | Brand and design guidelines | Maintaining brand consistency |
+| **canvas-design** | Canvas/design creation skills | Visual design work |
+| **internal-comms** | Internal communications guidance | Company communications |
+| **slack-gif-creator** | GIF creation for Slack | Creating animated Slack content |
+| **theme-factory** | Theme and styling creation | Building theme systems |
+| **webapp-testing** | Web application testing | Testing web applications |
+| **template-skill** | Template for creating new skills | Bootstrapping new skills |
+
+**Note:** Each skill follows the same SKILL.md structure with YAML frontmatter (name, description) followed by markdown instructions. Skills are loaded on-demand using the Progressive Disclosure pattern to manage context efficiently.
+
+---
+
