@@ -124,3 +124,69 @@ You are Mini-Agent, an intelligent assistant powered by MiniMax M2 that can help
 
 ---
 
+## Utility & Management Prompts
+
+### 3. Message History Summarization Prompt
+
+**Location:** `mini_agent/agent.py:228-244`
+
+**Purpose:** Used to automatically condense message history when token count exceeds limits. This prevents context window overflow while preserving essential information about agent execution. The prompt focuses on tool usage and execution results rather than user messages.
+
+**Trigger:** Automatically invoked by `_summarize_messages()` method when the message count exceeds `max_messages_before_summarize` parameter.
+
+**Key Features:**
+- Summarizes agent execution processes only (excludes user content)
+- Focuses on completed tasks and tool calls
+- Keeps key execution results
+- Limited to 1000 words
+- Always uses English
+
+**Associated System Prompt:** `"You are an assistant skilled at summarizing Agent execution processes."`
+
+**Usage Context:** Called automatically during agent execution loop when message history grows too large.
+
+**Prompt:**
+```python
+summary_prompt = f"""Please provide a concise summary of the following Agent execution process:
+
+{summary_content}
+
+Requirements:
+1. Focus on what tasks were completed and which tools were called
+2. Keep key execution results and important findings
+3. Be concise and clear, within 1000 words
+4. Use English
+5. Do not include "user" related content, only summarize the Agent's execution process"""
+```
+
+---
+
+### 4. Session Memory Instructions
+
+**Location:** `examples/04_full_agent.py:56-62` and `examples/03_session_notes.py:105-117`
+
+**Purpose:** Provides guidelines for using the session note recording and recall system. These instructions help the agent understand how to use memory tools to maintain context across conversations and execution chains.
+
+**Usage Context:** Added to task prompts when session memory features are enabled.
+
+**Key Features:**
+- Instructs on when to record notes (important facts, decisions, context)
+- Explains note categories (user_info, user_preference, project_info, decision, etc.)
+- Encourages proactive memory management
+- Promotes context recall at conversation start
+
+**Prompt:**
+```
+IMPORTANT - Session Memory:
+You have record_note and recall_notes tools. Use them to:
+- Save important facts, decisions, and context
+- Recall previous information across conversations
+
+Guidelines:
+- Proactively record key information during conversations
+- Recall notes at the start to restore context
+- Categories: user_info, user_preference, project_info, decision, etc.
+```
+
+---
+
