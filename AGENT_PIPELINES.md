@@ -891,3 +891,227 @@ Guidelines:
 
 ---
 
+## Tool Execution Pipeline
+
+### Overview
+
+The tool execution pipeline processes individual tool calls from the LLM response. Each tool call goes through extraction, validation, execution, error handling, and result formatting before being added back to the message history.
+
+### Pipeline Flow
+
+```
+INPUT: response.tool_calls from LLM
+    ↓
+┌─────────────────────────────────────────────────────────┐
+│ FOR EACH tool_call in response.tool_calls:             │
+│                                                         │
+│   ┌──────────────────────────────────────┐            │
+│   │ 1. Extract Tool Call Details        │            │
+│   │    - tool_call_id: unique ID        │            │
+│   │    - function_name: tool name       │            │
+│   │    - arguments: dict of params      │            │
+│   └──────────────┬───────────────────────┘            │
+│                  ↓                                     │
+│   ┌──────────────────────────────────────┐            │
+│   │ 2. Display Tool Call Info           │            │
+│   │    - Print function name            │            │
+│   │    - Print arguments (truncated)    │            │
+│   └──────────────┬───────────────────────┘            │
+│                  ↓                                     │
+│            ┌──────────────┐                            │
+│            │ Tool exists? │                            │
+│            └──┬────────┬──┘                            │
+│               │ NO     │ YES                           │
+│               ↓        ↓                               │
+│   ┌──────────────┐  ┌──────────────────────────────┐  │
+│   │ 3a. Unknown  │  │ 3b. Execute Tool             │  │
+│   │     Tool     │  │    try:                      │  │
+│   │   ToolResult │  │      tool = tools[fn_name]   │  │
+│   │   (error)    │  │      result = await          │  │
+│   └──────┬───────┘  │        tool.execute(**args)  │  │
+│          │          │    except Exception:         │  │
+│          │          │      Convert to ToolResult   │  │
+│          │          │      with error details      │  │
+│          │          └──────────────┬───────────────┘  │
+│          │                         │                  │
+│          └─────────┬───────────────┘                  │
+│                    ↓                                  │
+│   ┌──────────────────────────────────────┐           │
+│   │ 4. Log Tool Result                  │           │
+│   │    - AgentLogger.log_tool_result()  │           │
+│   │    - Record: name, args, success,   │           │
+│   │      content/error                  │           │
+│   └──────────────┬───────────────────────┘           │
+│                  ↓                                    │
+│   ┌──────────────────────────────────────┐           │
+│   │ 5. Display Result                   │           │
+│   │    Success: ✓ Result (truncated)    │           │
+│   │    Error: ✗ Error message           │           │
+│   └──────────────┬───────────────────────┘           │
+│                  ↓                                    │
+│   ┌──────────────────────────────────────┐           │
+│   │ 6. Create Tool Message              │           │
+│   │    Message(                         │           │
+│   │      role="tool",                   │           │
+│   │      content=result_content,        │           │
+│   │      tool_call_id=id,               │           │
+│   │      name=function_name             │           │
+│   │    )                                │           │
+│   └──────────────┬───────────────────────┘           │
+│                  ↓                                    │
+│   ┌──────────────────────────────────────┐           │
+│   │ 7. Add to Message History           │           │
+│   │    self.messages.append(tool_msg)   │           │
+│   └──────────────────────────────────────┘           │
+│                                                       │
+│   NEXT TOOL CALL →                                   │
+└─────────────────────────────────────────────────────────┘
+    ↓
+ALL TOOLS EXECUTED
+    ↓
+CONTINUE AGENT LOOP (next LLM call)
+```
+
+### Data Flow
+
+**Input (from LLM):**
+```python
+response.tool_calls = [
+    ToolCall(
+        id="call_abc123",
+        function=Function(
+            name="read_file",
+            arguments={"path": "config.yaml"}
+        )
+    ),
+    ToolCall(
+        id="call_def456",
+        function=Function(
+            name="bash",
+            arguments={"command": "ls -la"}
+        )
+    )
+]
+```
+
+**Output (to message history):**
+```python
+[
+    Message(
+        role="tool",
+        content="[file contents...]",
+        tool_call_id="call_abc123",
+        name="read_file"
+    ),
+    Message(
+        role="tool",
+        content="total 48\ndrwxr-xr-x 5 user group...",
+        tool_call_id="call_def456",
+        name="bash"
+    )
+]
+```
+
+**ToolResult Structure:**
+```python
+ToolResult(
+    success: bool,           # True if tool executed successfully
+    content: str,            # Tool output (if success)
+    error: str | None        # Error message (if failure)
+)
+```
+
+### Tool Types
+
+**1. File Operations:**
+- `read_file`: Read file contents with line numbers
+- `write_file`: Create or overwrite files
+- `edit_file`: Make targeted edits using string replacement
+
+**2. Command Execution:**
+- `bash`: Execute shell commands (bash/PowerShell)
+- `get_bash_output`: Retrieve output from background process
+- `kill_bash`: Terminate background process
+
+**3. Skill Management:**
+- `get_skill`: Load full skill content (Level 2)
+
+**4. Memory:**
+- `record_note`: Save information to session memory
+- `recall_notes`: Retrieve saved notes
+
+**5. MCP Tools (Optional):**
+- Dynamically loaded from configured MCP servers
+- Various capabilities depending on server
+
+### Error Handling
+
+**Error Types:**
+
+1. **Unknown Tool:**
+```python
+ToolResult(
+    success=False,
+    content="",
+    error="Unknown tool: non_existent_tool"
+)
+```
+
+2. **Tool Execution Exception:**
+```python
+ToolResult(
+    success=False,
+    content="",
+    error="Tool execution failed: ValueError: Invalid path\n\nTraceback:\n..."
+)
+```
+
+3. **Tool-Specific Errors:**
+```python
+# From individual tool implementations
+ToolResult(
+    success=False,
+    content="",
+    error="File not found: /path/to/missing.txt"
+)
+```
+
+### Key Implementation Details
+
+**Location:** `mini_agent/agent.py` (lines 332-403)
+
+**Parallel Execution:** Tools are executed sequentially in the order provided by LLM (no parallel execution within a single step)
+
+**Error Recovery:** Tool failures do not stop execution - they are converted to error ToolResults and added to history, allowing the agent to retry or adjust approach
+
+**Truncation:**
+- Input arguments: Truncated to 200 chars for display
+- Output results: Truncated to 300 chars for display
+- Full content still added to message history
+
+**Logging:** Every tool execution is logged to JSONL file with:
+- Tool name
+- Arguments (full)
+- Success status
+- Result content or error
+
+### Tool Result Usage
+
+After tools execute, results become context for the next LLM call:
+
+```python
+messages = [
+    Message(role="system", content=system_prompt),
+    Message(role="user", content="Read config.yaml"),
+    Message(role="assistant", content="I'll read...", tool_calls=[...]),
+    Message(role="tool", content="api_key: xyz...", name="read_file"),  # ← Tool result
+]
+
+# Next LLM call includes this tool result, allowing agent to:
+# - See file contents
+# - Make decisions based on data
+# - Call more tools or complete task
+```
+
+---
+
