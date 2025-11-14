@@ -541,3 +541,104 @@ The following skills are also available in the system:
 
 ---
 
+## Summary
+
+### Prompt Categories Overview
+
+| Category | Count | Purpose |
+|----------|-------|---------|
+| **Core System Prompts** | 2 | Define agent identity, capabilities, and operational guidelines |
+| **Utility & Management** | 2 | Handle message summarization and session memory |
+| **Tool Descriptions** | 8+ | Inform AI how to use file, bash, skill, and memory tools |
+| **Skill-Based Prompts** | 11 | Provide specialized domain knowledge and workflows |
+
+### Key Design Patterns
+
+1. **Progressive Disclosure (3-Level Loading)**
+   - Level 1: Metadata only (names + descriptions in system prompt)
+   - Level 2: Full content loaded on-demand via `get_skill()`
+   - Level 3+: Bundled resources accessed as needed
+
+2. **Dynamic Injection**
+   - Skills metadata is injected into system prompt at runtime
+   - Placeholder `{SKILLS_METADATA}` is replaced during agent initialization
+
+3. **Context Management**
+   - Automatic message history summarization when limits exceeded
+   - Token-based file content truncation (head + tail preservation)
+   - Lazy loading for skills and bundled resources
+
+4. **Persistent Memory**
+   - Session notes stored in JSON format
+   - Category-based organization
+   - Cross-session context preservation
+
+### Prompt Loading Flow
+
+```
+Agent Initialization
+    ↓
+Load system_prompt.md
+    ↓
+Inject {SKILLS_METADATA} (Level 1 - Progressive Disclosure)
+    ↓
+Register Tools (with description prompts)
+    ↓
+Agent Ready
+    ↓
+During Execution:
+    - Load skills on-demand via get_skill() (Level 2)
+    - Access bundled resources as needed (Level 3+)
+    - Auto-summarize messages when context fills
+    - Record/recall session notes for persistence
+```
+
+### Token Optimization Strategies
+
+1. **Skills**: Progressive disclosure prevents loading all skill content at once
+2. **Files**: Token-based truncation with head+tail preservation
+3. **Messages**: Automatic summarization focusing on tool usage and results
+4. **Resources**: Scripts/references loaded only when referenced by agent
+
+### Extensibility
+
+New prompts can be added via:
+- **System Prompt**: Edit `mini_agent/config/system_prompt.md`
+- **New Skills**: Create `mini_agent/skills/<skill-name>/SKILL.md` with frontmatter
+- **Tool Descriptions**: Add new tool classes in `mini_agent/tools/`
+- **Session Instructions**: Include in task prompts or example code
+
+---
+
+## File Locations Reference
+
+```
+mini_agent/
+├── config/
+│   └── system_prompt.md                    # Main system prompt
+├── agent.py                                 # Summarization prompt (line 228-244)
+├── cli.py                                   # Fallback prompt (line 421)
+├── tools/
+│   ├── file_tools.py                       # File operation tool descriptions
+│   ├── bash_tool.py                        # Bash execution tool descriptions
+│   ├── skill_tool.py                       # Skill loading tool description
+│   └── note_tool.py                        # Session memory tool descriptions
+└── skills/
+    ├── skill-creator/SKILL.md
+    ├── artifacts-builder/SKILL.md
+    ├── mcp-builder/SKILL.md
+    ├── algorithmic-art/SKILL.md
+    ├── brand-guidelines/SKILL.md
+    ├── canvas-design/SKILL.md
+    ├── internal-comms/SKILL.md
+    ├── slack-gif-creator/SKILL.md
+    ├── template-skill/SKILL.md
+    ├── theme-factory/SKILL.md
+    └── webapp-testing/SKILL.md
+```
+
+---
+
+**Document Version:** 1.0
+**Last Updated:** 2025-11-14
+**Total Prompts Documented:** 23+
