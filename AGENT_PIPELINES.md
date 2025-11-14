@@ -690,3 +690,204 @@ skills/
 
 ---
 
+## Session Memory Pipeline
+
+### Overview
+
+The session memory pipeline enables agents to maintain persistent context across conversations and execution chains. It provides two tools (record_note and recall_notes) that allow agents to proactively save and retrieve important information.
+
+### Pipeline Flow
+
+```
+RECORDING PATH:
+    ↓
+┌──────────────────────────────────────┐
+│ 1. Agent Identifies Important Info  │
+│    - User preferences                │
+│    - Project details                 │
+│    - Key decisions                   │
+│    - Critical facts                  │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 2. Agent Calls record_note()        │
+│    Tool Call:                        │
+│    - content: "info to record"      │
+│    - category: "user_preference"    │
+│      (optional)                      │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 3. SessionNoteTool.execute()        │
+│    - Load existing notes (JSON)     │
+│    - Create note object:            │
+│      {                               │
+│        "timestamp": "2025-11-14...", │
+│        "category": "category",       │
+│        "content": "info"             │
+│      }                               │
+│    - Append to notes list           │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 4. Save to File                     │
+│    - Create workspace/.agent_memory │
+│      .json (if not exists)          │
+│    - Write notes as JSON            │
+│    - Return success result          │
+└──────────────────────────────────────┘
+               ↓
+          NOTE RECORDED
+
+
+RECALL PATH:
+    ↓
+┌──────────────────────────────────────┐
+│ 1. Agent Needs Context              │
+│    - Start of new conversation      │
+│    - Needs to remember preferences  │
+│    - Requires project info          │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 2. Agent Calls recall_notes()       │
+│    Tool Call:                        │
+│    - category: "optional_filter"    │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 3. RecallNoteTool.execute()         │
+│    - Check if memory file exists    │
+│    - Load notes from JSON           │
+│    - Filter by category (optional)  │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 4. Format & Return Notes            │
+│    - Format as readable markdown    │
+│    - Group by category              │
+│    - Include timestamps             │
+│    - Return as tool result          │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 5. Agent Uses Context               │
+│    - Understands preferences        │
+│    - Recalls decisions              │
+│    - Continues previous work        │
+└──────────────────────────────────────┘
+               ↓
+       CONTEXT RESTORED
+```
+
+### Data Flow
+
+**Storage Location:** `workspace/.agent_memory.json`
+
+**Note Structure:**
+```json
+[
+  {
+    "timestamp": "2025-11-14T10:30:45.123456",
+    "category": "user_preference",
+    "content": "User prefers concise responses without verbose explanations"
+  },
+  {
+    "timestamp": "2025-11-14T10:32:15.789012",
+    "category": "project_info",
+    "content": "Project: E-commerce platform using Python 3.12 and FastAPI"
+  },
+  {
+    "timestamp": "2025-11-14T10:35:22.456789",
+    "category": "decision",
+    "content": "Decided to use PostgreSQL for database instead of MongoDB"
+  }
+]
+```
+
+**Tool Call Examples:**
+
+```python
+# Recording a note
+record_note(
+    content="User wants API responses in JSON format with snake_case keys",
+    category="user_preference"
+)
+
+# Recalling all notes
+recall_notes()
+
+# Recalling filtered notes
+recall_notes(category="project_info")
+```
+
+**Tool Result Format:**
+
+```markdown
+## Recorded Session Notes
+
+### user_preference
+- [2025-11-14 10:30:45] User prefers concise responses without verbose explanations
+- [2025-11-14 10:35:22] User wants API responses in JSON format with snake_case keys
+
+### project_info
+- [2025-11-14 10:32:15] Project: E-commerce platform using Python 3.12 and FastAPI
+- [2025-11-14 10:38:10] Database: PostgreSQL 15, Redis for caching
+
+### decision
+- [2025-11-14 10:35:22] Decided to use PostgreSQL for database instead of MongoDB
+- [2025-11-14 10:40:05] Using JWT tokens for authentication, 24-hour expiry
+```
+
+### Prompts Involved
+
+**Session Memory Instructions (Optional):**
+
+When memory features are explicitly enabled, task prompts may include:
+
+```
+IMPORTANT - Session Memory:
+You have record_note and recall_notes tools. Use them to:
+- Save important facts, decisions, and context
+- Recall previous information across conversations
+
+Guidelines:
+- Proactively record key information during conversations
+- Recall notes at the start to restore context
+- Categories: user_info, user_preference, project_info, decision, etc.
+```
+
+**Note:** This instruction is not always included - agents can discover and use memory tools organically through tool descriptions.
+
+### Key Implementation Details
+
+**Location:** `mini_agent/tools/note_tool.py`
+
+**Lazy Initialization:** Memory file and directory are only created when first note is recorded
+
+**Error Handling:**
+- Missing file: Returns "No notes recorded yet"
+- JSON parse errors: Returns empty list
+- Write failures: Returns error in ToolResult
+
+**Categories (Common Patterns):**
+- `user_info`: Personal details, background
+- `user_preference`: Preferences, style choices
+- `project_info`: Project details, tech stack
+- `decision`: Important decisions made
+- `general`: Miscellaneous information
+
+**Persistence:** Notes survive across:
+- Multiple agent runs
+- Different sessions
+- CLI restarts
+
+**Use Cases:**
+1. **Multi-turn conversations:** Remember context from earlier in conversation
+2. **Cross-session memory:** Recall decisions from previous days
+3. **User preferences:** Remember how user likes things done
+4. **Project continuity:** Keep track of project-specific details
+5. **Decision tracking:** Record why certain choices were made
+
+---
+
