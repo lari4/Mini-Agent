@@ -483,3 +483,210 @@ Assistant: I'll create...
 
 ---
 
+## Skill Loading Pipeline (Progressive Disclosure)
+
+### Overview
+
+The skill loading pipeline implements a 3-level Progressive Disclosure pattern to efficiently manage skill content in the context window. Skills provide specialized procedural knowledge without consuming excessive tokens until needed.
+
+### Three-Level Loading System
+
+```
+LEVEL 1: Metadata Only (Initialization)
+    - Skill name + description
+    - Injected into system prompt
+    - Always present, minimal tokens
+    - Agent can browse available skills
+
+LEVEL 2: Full Skill Content (On-Demand)
+    - Complete SKILL.md content
+    - Loaded via get_skill() tool call
+    - Contains detailed instructions
+    - References to Level 3 resources
+
+LEVEL 3+: Bundled Resources (As-Needed)
+    - scripts/ - Executable code
+    - references/ - Documentation
+    - assets/ - Template files
+    - Loaded via read_file/bash
+```
+
+### Pipeline Flow
+
+```
+INITIALIZATION PHASE:
+    ↓
+┌──────────────────────────────────────┐
+│ 1. SkillLoader.discover_skills()    │
+│    - Scan skills_dir directory      │
+│    - Find all */SKILL.md files      │
+│    - Parse YAML frontmatter         │
+│    - Extract: name, description     │
+│    - Store in loaded_skills dict    │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 2. Generate Skills Metadata Prompt  │
+│    - Format all skill names+desc    │
+│    - Create markdown list           │
+│    - Return as string               │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 3. Inject into System Prompt        │
+│    - Replace {SKILLS_METADATA}      │
+│    - Result: System prompt with     │
+│      skill directory (Level 1)      │
+└──────────────┬───────────────────────┘
+               ↓
+    READY: Agent knows about skills
+           but hasn't loaded content yet
+
+RUNTIME PHASE (when agent needs a skill):
+    ↓
+┌──────────────────────────────────────┐
+│ 4. Agent Decides to Use Skill       │
+│    - Reviews task requirements      │
+│    - Checks Level 1 metadata        │
+│    - Identifies relevant skill      │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 5. Agent Calls get_skill(name)      │
+│    - Tool call with skill_name      │
+│    - GetSkillTool.execute() runs    │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 6. SkillLoader.get_skill(name)      │
+│    - Lookup skill in loaded_skills  │
+│    - Return Skill object            │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 7. Skill.to_prompt()                │
+│    - Read SKILL.md file             │
+│    - Include YAML metadata          │
+│    - Format as markdown             │
+│    - Add resource directory info    │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 8. Return as Tool Result            │
+│    - ToolResult(success=True,       │
+│                content=skill_prompt) │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 9. Add to Message History           │
+│    - Message(role="tool",           │
+│              content=skill_content, │
+│              name="get_skill")      │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ 10. Agent Follows Instructions      │
+│     - Reads procedural guidance     │
+│     - Executes steps using tools    │
+│     - May load Level 3 resources    │
+│       (scripts, references, assets) │
+└──────────────────────────────────────┘
+               ↓
+          TASK COMPLETE
+```
+
+### Data Flow
+
+**Level 1 (Metadata) Data Structure:**
+```python
+{
+    "skill-creator": Skill(
+        name="skill-creator",
+        description="Guide for creating effective skills...",
+        skill_dir=Path("/path/to/skills/skill-creator"),
+        skill_file=Path("/path/to/skills/skill-creator/SKILL.md")
+    ),
+    "artifacts-builder": Skill(...),
+    ...
+}
+```
+
+**Level 1 Injected Prompt:**
+```markdown
+### Available Skills
+
+**skill-creator** - Guide for creating effective skills. This skill should be used when users want to create a new skill...
+**artifacts-builder** - Suite of tools for creating elaborate, multi-component claude.ai HTML artifacts...
+**mcp-builder** - Guide for creating high-quality MCP servers...
+```
+
+**Level 2 (Full Content) Example:**
+```markdown
+---
+name: artifacts-builder
+description: Suite of tools for creating elaborate HTML artifacts...
+---
+
+# Artifacts Builder
+
+To build powerful frontend claude.ai artifacts, follow these steps:
+1. Initialize the frontend repo using `scripts/init-artifact.sh`
+2. Develop your artifact by editing the generated code
+3. Bundle all code into a single HTML file using `scripts/bundle-artifact.sh`
+
+[... detailed instructions ...]
+
+## Bundled Resources
+- scripts/init-artifact.sh
+- scripts/bundle-artifact.sh
+```
+
+**Level 3 (Resources) Access:**
+```python
+# Agent calls (after loading Level 2):
+bash(command="bash scripts/init-artifact.sh my-project")
+read_file(path="references/api_docs.md")
+```
+
+### Prompts Involved
+
+**1. Skills Metadata Prompt (Level 1):**
+Generated dynamically by `SkillLoader.get_skills_metadata_prompt()`
+
+**2. Individual Skill Prompt (Level 2):**
+Full SKILL.md content returned by `get_skill()` tool
+
+**3. Resource References (Level 3):**
+Referenced in skill instructions, loaded via standard tools
+
+### Key Implementation Details
+
+**Location:**
+- `mini_agent/tools/skill_loader.py` (SkillLoader class)
+- `mini_agent/tools/skill_tool.py` (GetSkillTool)
+- `mini_agent/cli.py` (lines 424-436 - injection logic)
+
+**Skill Discovery:**
+- Scans for `*/SKILL.md` files
+- Parses YAML frontmatter
+- Validates required fields (name, description)
+
+**Resource Organization:**
+```
+skills/
+├── skill-name/
+│   ├── SKILL.md (Level 2)
+│   ├── scripts/ (Level 3)
+│   ├── references/ (Level 3)
+│   └── assets/ (Level 3)
+```
+
+**Benefits:**
+1. **Token Efficiency:** Only load content when needed
+2. **Scalability:** Can have many skills without context bloat
+3. **Discoverability:** Level 1 makes all skills visible
+4. **Flexibility:** Agent decides when to load details
+5. **Modularity:** Skills are self-contained packages
+
+---
+
