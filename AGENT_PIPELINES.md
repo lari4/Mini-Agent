@@ -303,3 +303,183 @@ tools = [
 
 ---
 
+## Message Summarization Pipeline
+
+### Overview
+
+The message summarization pipeline automatically condenses conversation history when token count exceeds the configured limit. This prevents context window overflow while preserving essential information about agent execution. The pipeline uses a separate LLM call to create intelligent summaries.
+
+### Pipeline Flow
+
+```
+TRIGGER: Token count > token_limit (default: 80,000)
+    ↓
+┌──────────────────────────────────────┐
+│ 1. Estimate Token Count              │
+│    - Use tiktoken (cl100k_base)      │
+│    - Count all messages, thinking,   │
+│      tool_calls                      │
+└──────────────┬───────────────────────┘
+               ↓
+         ┌─────────────┐
+         │ > limit?    │
+         └──┬───────┬──┘
+            │ NO    │ YES
+            ↓       ↓
+      ┌─────────┐  ┌──────────────────────────────────┐
+      │ SKIP    │  │ 2. Find User Message Indices     │
+      │ Return  │  │    - Skip system prompt (index 0)│
+      └─────────┘  │    - Locate all user messages    │
+                   │    - user_indices = [i1, i2, ...] │
+                   └──────────────┬───────────────────┘
+                                  ↓
+                   ┌──────────────────────────────────┐
+                   │ 3. Build New Message List        │
+                   │    new_messages = [system_msg]   │
+                   │                                  │
+                   │    FOR EACH user message:        │
+                   │      - Add user message          │
+                   │      - Extract execution msgs    │
+                   │        (from user+1 to next user)│
+                   │      - IF execution msgs exist:  │
+                   │          → Summarize them        │
+                   │          → Add summary as user   │
+                   │            message               │
+                   └──────────────┬───────────────────┘
+                                  ↓
+                   ┌──────────────────────────────────┐
+                   │ 4. Create Summary (per round)    │
+                   │    - Build summary_content:      │
+                   │      • Extract assistant msgs    │
+                   │      • List tool calls           │
+                   │      • Include tool results      │
+                   │                                  │
+                   │    - Call LLM with:              │
+                   │      System: "You are assistant  │
+                   │               skilled at         │
+                   │               summarizing Agent  │
+                   │               execution"         │
+                   │      User: summary_prompt        │
+                   │                                  │
+                   │    - summary_prompt requirements:│
+                   │      1. Focus on completed tasks │
+                   │      2. Keep key results         │
+                   │      3. Be concise (<1000 words) │
+                   │      4. Use English              │
+                   │      5. Agent execution only     │
+                   └──────────────┬───────────────────┘
+                                  ↓
+                   ┌──────────────────────────────────┐
+                   │ 5. Replace Message History       │
+                   │    self.messages = new_messages  │
+                   │                                  │
+                   │    Structure:                    │
+                   │    [system,                      │
+                   │     user1,                       │
+                   │     summary1,                    │
+                   │     user2,                       │
+                   │     summary2,                    │
+                   │     ...]                         │
+                   └──────────────┬───────────────────┘
+                                  ↓
+                   ┌──────────────────────────────────┐
+                   │ 6. Report Results                │
+                   │    - Print token reduction       │
+                   │    - Show new structure          │
+                   └──────────────────────────────────┘
+                                  ↓
+                              COMPLETE
+```
+
+### Data Flow
+
+**Input:**
+- `self.messages`: Full message history
+- `self.token_limit`: Token threshold (default: 80,000)
+
+**Output:**
+- Condensed `self.messages` with summaries
+- Token count reduction
+
+**Message Transformation Example:**
+
+```
+Before Summarization (85,000 tokens):
+[
+  Message(role="system", content=system_prompt),
+  Message(role="user", content="Create a file..."),
+  Message(role="assistant", content="I'll create...", tool_calls=[...]),
+  Message(role="tool", content="File created", tool_call_id=...),
+  Message(role="assistant", content="Now I'll...", tool_calls=[...]),
+  Message(role="tool", content="Command executed", tool_call_id=...),
+  Message(role="assistant", content="Task complete"),
+  Message(role="user", content="Add more features..."),
+  Message(role="assistant", content="I'll add...", tool_calls=[...]),
+  Message(role="tool", content="Feature added", tool_call_id=...),
+  # ... many more messages
+]
+
+After Summarization (45,000 tokens):
+[
+  Message(role="system", content=system_prompt),
+  Message(role="user", content="Create a file..."),
+  Message(role="user", content="[Assistant Execution Summary]\n\nRound 1: Agent created a file named 'test.txt' using write_file tool, then executed a bash command to verify the file. Task completed successfully."),
+  Message(role="user", content="Add more features..."),
+  Message(role="user", content="[Assistant Execution Summary]\n\nRound 2: Agent added requested features by editing the file and running tests using bash tool. All tests passed."),
+  # ... continues with remaining conversations
+]
+```
+
+### Prompts Involved
+
+**1. Summary System Prompt:**
+```
+You are an assistant skilled at summarizing Agent execution processes.
+```
+
+**2. Summary User Prompt Template:**
+```python
+summary_prompt = f"""Please provide a concise summary of the following Agent execution process:
+
+{summary_content}
+
+Requirements:
+1. Focus on what tasks were completed and which tools were called
+2. Keep key execution results and important findings
+3. Be concise and clear, within 1000 words
+4. Use English
+5. Do not include "user" related content, only summarize the Agent's execution process"""
+```
+
+**3. Summary Content Structure:**
+```
+Round {round_num} execution process:
+
+Assistant: I'll create...
+  → Called tools: write_file, bash
+  ← Tool returned: Success
+```
+
+### Key Implementation Details
+
+**Location:** `mini_agent/agent.py` (lines 137-257)
+
+**Token Counting:** Uses `tiktoken` with `cl100k_base` encoding for accurate estimation
+
+**Summarization Strategy:**
+- Keep system prompt unchanged
+- Keep all user messages (preserve user intent)
+- Summarize agent execution rounds between user messages
+- Summaries are added as special user messages with `[Assistant Execution Summary]` prefix
+
+**Error Handling:** If summary generation fails, falls back to simple text-based summary
+
+**Benefits:**
+1. Prevents context window overflow
+2. Preserves user intent (all user messages kept)
+3. Maintains execution continuity (key results preserved)
+4. Enables long-running conversations
+5. Reduces token costs
+
+---
+
